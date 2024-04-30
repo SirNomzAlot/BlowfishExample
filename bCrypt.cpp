@@ -3,8 +3,6 @@
 
 using namespace std;
 
-const char* test = "penis\0";
-
 const int salt_len = 16;
 const int pass_max_len = 72;
 const int min_cost = 4;
@@ -208,10 +206,10 @@ struct Keys {
 Keys* initState() {
 	Keys *key = (Keys*)malloc(sizeof(Keys));
 	memcpy(&(key->P), &initP, 18);
-	memcpy(&(key->S0), &initS0, 18);
-	memcpy(&(key->S1), &initS1, 18);
-	memcpy(&(key->S2), &initS2, 18);
-	memcpy(&(key->S3), &initS3, 18);
+	memcpy(&(key->S0), &initS0, 256);
+	memcpy(&(key->S1), &initS1, 256);
+	memcpy(&(key->S2), &initS2, 256);
+	memcpy(&(key->S3), &initS3, 256);
 	return key;
 }
 
@@ -243,6 +241,7 @@ uint32_t block32(uint8_t block[8], bool high) {
 }
 
 uint8_t* encrypt(Keys *key, uint8_t block[8]) {
+	cout << block << "\n";
 	for (short r = 0; r<16; r++) {
 		block[0]^=key->P[r]>>24;
 		block[1]^=(key->P[r]>>16)&0xFF;
@@ -275,10 +274,10 @@ uint8_t* encrypt(Keys *key, uint8_t block[8]) {
 
 char* encryptECB(Keys* key, char* cText) {
 	int rounds = sizeof(cText)>>3;
-	Keys *copy;
+	Keys *copy = (Keys*)malloc(sizeof(Keys));
 	for (int i=0; i<rounds; i++) {
-		memcpy(copy, key, sizeof(Keys));
-		encrypt(copy, (uint8_t*)(cText+(i<<3)));
+		memcpy(copy, key, sizeof(key));
+		encrypt(copy, (uint8_t*)(cText+(i<<2)));
 	}
 	return cText;
 }
@@ -385,10 +384,11 @@ Keys* EksBowfishSetup(char password[72], uint8_t salt[16], int cost) {
 
 	int costTotal = 2<<(cost-1);
 	char *saltExtend = expandPass((char*)salt);
+	uint8_t zero[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
 	for (int i=0; i<costTotal; i++) {
-		expandKey(key, expandPass(password), 0);
+		expandKey(key, expandPass(password), zero);
 
-		expandKey(key, saltExtend, 0);
+		expandKey(key, saltExtend, zero);
 	}
 	free(saltExtend);
 	return key;
