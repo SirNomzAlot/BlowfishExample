@@ -241,7 +241,6 @@ uint32_t block32(uint8_t block[8], bool high) {
 }
 
 uint8_t* encrypt(Keys *key, uint8_t block[8]) {
-	cout << block << "\n";
 	for (short r = 0; r<16; r++) {
 		block[0]^=key->P[r]>>24;
 		block[1]^=(key->P[r]>>16)&0xFF;
@@ -270,16 +269,6 @@ uint8_t* encrypt(Keys *key, uint8_t block[8]) {
 	block[3]^=key->P[17]&0xFF;
 
 	return block;
-}
-
-char* encryptECB(Keys* key, char* cText) {
-	int rounds = sizeof(cText)>>3;
-	Keys *copy = (Keys*)malloc(sizeof(Keys));
-	for (int i=0; i<rounds; i++) {
-		memcpy(copy, key, sizeof(key));
-		encrypt(copy, (uint8_t*)(cText+(i<<2)));
-	}
-	return cText;
 }
 
 uint8_t* decrypt(Keys *key, uint8_t block[8]) {
@@ -313,39 +302,40 @@ uint8_t* decrypt(Keys *key, uint8_t block[8]) {
 	return block;
 }
 
-char* expandPass(char* password) {
-	int size = sizeof(password);
-	char *fullPass = (char*)malloc(72);
-	for (int i=0; i<72; i++) {
-		fullPass[i] = password[i%size];
-	}
-	return fullPass;
-}
-
-Keys* expandKey(Keys* key, char password[72], uint8_t salt[16]) {
+Keys* expandKey(Keys* key, char* password, uint8_t salt[16]) {
+	short passLen = (short)strlen(password);
 	for (short i = 0; i<18; i++) {
-		key->P[i] ^= (uint32_t)password[i<<2]+
-					 ((uint32_t)password[(i<<2)+1]<<8)+
-					 ((uint32_t)password[(i<<2)+2]<<16)+
-					 ((uint32_t)password[(i<<2)+3]<<24);
+		key->P[i] ^= ((uint32_t)password[(i*4)%passLen]<<24)+
+					 ((uint32_t)password[(i*4+1)%passLen]<<16)+
+					 ((uint32_t)password[(i*4+2)%passLen]<<8)+
+					 ((uint32_t)password[(i*4+3)%passLen]);
 	}
 
 	uint8_t block[8] = {0,0,0,0,0,0,0,0};
 
 	for (short n = 0; n<8; n++) {
-		block[n] = salt[n+(n&1)*8];
+		short hold = (n&1)*8;
+		block[0]^=salt[hold];
+		block[1]^=salt[hold+1];
+		block[2]^=salt[hold+2];
+		block[3]^=salt[hold+3];
+		block[4]^=salt[hold+4];
+		block[5]^=salt[hold+5];
+		block[6]^=salt[hold+6];
+		block[7]^=salt[hold+7];
 
 		encrypt(key, block);
 
-		key->P[n<<1] = block32(block, false);
+		key->P[(n+1)*2] = block32(block, false);
 
-		key->P[(n<<1)+1]=block32(block, true);
+		key->P[((n+1)*2)+1]=block32(block, true);
 	}
 
 	for (short i = 0; i < 4; i++) {
 		uint32_t *box;
 		switch (i) {
 			default:
+				cout << "faliure\n";
 				return NULL;
 			case 0:
 				box = key->S0;
@@ -360,21 +350,30 @@ Keys* expandKey(Keys* key, char password[72], uint8_t salt[16]) {
 				box = key->S3;
 		}
 		for (short n = 0; n<127; n++) {
-			block[0]^=salt[0];
-			block[1]^=salt[1];
-			block[2]^=salt[2];
-			block[3]^=salt[3];
-			block[4]^=salt[4];
-			block[5]^=salt[5];
-			block[6]^=salt[6];
-			block[7]^=salt[7];
+			short hold = (n&1)*8;
+			block[0]^=salt[hold];
+			block[1]^=salt[hold+1];
+			block[2]^=salt[hold+2];
+			block[3]^=salt[hold+3];
+			block[4]^=salt[hold+4];
+			block[5]^=salt[hold+5];
+			block[6]^=salt[hold+6];
+			block[7]^=salt[hold+7];
 			encrypt(key, block);
 
-			box[n<<1] = block32(block, false);
-			box[(n<<1)+1] = block32(block, true);
+			box[n*2] = block32(block, false);
+			box[n*2+1] = block32(block, true);
 		}
 	}
 	return key;
+}
+
+uint8_t* encryptECB(Keys* key, uint8_t cText[24]) {
+	int rounds = 3;
+	for (int i=0; i<rounds; i++) {
+		encrypt(key, (uint8_t*)(cText+(i*8)));
+	}
+	return cText;
 }
 
 Keys* EksBowfishSetup(char password[72], uint8_t salt[16], int cost) {
@@ -382,31 +381,35 @@ Keys* EksBowfishSetup(char password[72], uint8_t salt[16], int cost) {
 
 	expandKey(key, password, salt);
 
-	int costTotal = 2<<(cost-1);
-	char *saltExtend = expandPass((char*)salt);
 	uint8_t zero[16] = {0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0};
-	for (int i=0; i<costTotal; i++) {
-		expandKey(key, expandPass(password), zero);
-
-		expandKey(key, saltExtend, zero);
+	for (short costT = 1<<cost; costT>0; costT--) {
+		expandKey(key, password, zero);
+		expandKey(key, (char*)salt, zero);
 	}
-	free(saltExtend);
 	return key;
 }
 
 char* bcrypt(char* password, uint8_t* salt, int cost) {
-	char* passExtend = expandPass(password);
-	Keys* key = EksBowfishSetup(passExtend, salt, cost);
-	char* cText = (char*)"OrpheanBeholderScryDoubt";
+	Keys* key = EksBowfishSetup(password, salt, cost);
+	uint8_t cText[] = {0x4f, 0x72, 0x70, 0x68, 0x65, 0x61,
+					   0x6e, 0x42, 0x65, 0x68, 0x6f, 0x6c,
+            		   0x64, 0x65, 0x72, 0x53, 0x63, 0x72,
+            		   0x79, 0x44, 0x6f, 0x75, 0x62, 0x74, 0x00};
+
 	for (int i = 0; i<64;i++) {
 		encryptECB(key, cText);
 	}
+	free(key);
 
-	return cText;
+	//password = (char*)cText;
+	cout << cText << "\n";
+	//return;
 }
 
 int main() {
 	char* test = (char*)"hello";
-	char* result = bcrypt(test, (uint8_t*)"NkdsPvOBTGql26c1", 10);
-	cout << result << "\n";
+	char* result = bcrypt(test, (uint8_t*)"yrtMmRS1Uyxu0kRP", 10);
+	//cout << result << "\n";
+	//				          9iE9sOE9yiZJF/Mt3wqfNa.xYtVTXslZ1OG2m
+	// $2y$10$yrtMmRS1Uyxu0kRP9iE9sOE9yiZJF/Mt3wqfNa.xYtVTXslZ1OG2m
 }
